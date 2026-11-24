@@ -1,6 +1,6 @@
 # SAP official & customs exchange rates
 
-Load **official exchange rates** — customs valuation rates from 46 customs authorities, central bank reference rates from 124 central banks, and tax authority tables — from the [AllRatesToday API](https://allratestoday.com/customs-exchange-rate-api/) into SAP S/4HANA, SAP ECC and SAP Global Trade Services (GTS).
+Load **official exchange rates** — customs valuation rates for 66 clearance countries, central bank reference rates from 124 central banks, and tax authority tables — from the [AllRatesToday API](https://allratestoday.com/customs-exchange-rate-api/) into SAP S/4HANA, SAP ECC and SAP Global Trade Services (GTS).
 
 Two routes, both writing to table **TCURR** under the exchange rate type you choose (for example `ZCUS` for customs, `M` for the standard rate):
 
