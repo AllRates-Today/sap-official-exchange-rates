@@ -39,6 +39,7 @@ The iFlow has four steps:
 | `HomeCurrency` | Write every rate as foreign → home (direct quotation) | the table's own direction |
 | `Currencies` | Comma list to keep, e.g. `USD,GBP,JPY` | all |
 | `Factors` | Ratios matching OBBS/TCURF, e.g. `JPY:100,KRW:1000` | 1 |
+| `TableRateType` | Side of a two-sided table: `import` or `export` (CBIC, Thai Customs, Korea Customs, Iceland, URA) | one row per currency, import first |
 | `SenderPort`, `SenderPartner`, `ReceiverPort`, `ReceiverPartner` | EDI_DC40 partner data (partner type `LS`) | — |
 | `UpdateAllowed` / `ChangeFixed` / `AllowedDeviation` | `UPD_ALLOW` / `CHG_FIXED` / `DEV_ALLOW` | `X` / blank / `000` |
 
@@ -62,7 +63,9 @@ As in SAP's own exchange-rate recipe on the [SAP Integration Recipes repository]
 
 ## Route 2: ABAP report
 
-`ZALLRATES_LOAD_EXCHANGE_RATES` calls the API with `CL_HTTP_CLIENT`, parses it with `/UI2/CL_JSON`, writes every rate as foreign → `P_HOME` and posts it with `BAPI_EXCHRATE_CREATEMULTIPLE` followed by `BAPI_TRANSACTION_COMMIT`. Selection screen: clearance country **or** source code, date (empty = today's table), home currency, rate type, optional currency list and ratios, test mode (on by default).
+`ZALLRATES_LOAD_EXCHANGE_RATES` calls the API with `CL_HTTP_CLIENT`, parses it with `/UI2/CL_JSON`, writes every rate as foreign → `P_HOME` and posts it with `BAPI_EXCHRATE_CREATEMULTIPLE` followed by `BAPI_TRANSACTION_COMMIT`. Selection screen: clearance country **or** source code, date (empty = today's table), home currency, rate type, optional currency list and ratios, table side (`P_RTYP`: `import` or `export` for two-sided tables; empty = one row per currency, import first), test mode (on by default).
+
+**Two-sided tables.** India (CBIC), Thailand, Korea, Iceland and Uganda publish separate import and export rates for each currency. Load each side into its own rate type (for example `ZCIN` with `import`, `ZCIX` with `export`) and assign each to the matching legal regulation in GTS.
 
 Prerequisites: the SSL client PSE (STRUST) must trust allratestoday.com's certificate chain; replace `GET_API_KEY` with your secure storage; translation ratios as above. Schedule it with SM36 on the source's cadence.
 

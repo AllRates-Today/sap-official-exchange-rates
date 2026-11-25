@@ -40,4 +40,15 @@ def m3 = new Message(body: big, props: [SenderPort: 'P', SenderPartner: 'S', Rec
 script.processData(m3)
 assertEq(new XmlSlurper().parseText(m3.getBody(String)).IDOC.E1EXCHANGE_RATE.E1BP1093_0.size(), 1, 'IRR skipped')
 
+// Two-sided table (CBIC): one row per currency, import by default, export on request
+def cbic = '{"bank":"cbic","rate_date":"2026-11-20","rates":[{"base":"USD","quote":"INR","type":"export","value":92.4},{"base":"USD","quote":"INR","type":"import","value":94.1}]}'
+def m4 = new Message(body: cbic, props: [RateType: 'ZCIN', HomeCurrency: 'INR', SenderPort: 'P', SenderPartner: 'S', ReceiverPort: 'R', ReceiverPartner: 'T'])
+script.processData(m4)
+def s4 = new XmlSlurper().parseText(m4.getBody(String)).IDOC.E1EXCHANGE_RATE.E1BP1093_0
+assertEq(s4.size(), 1, 'one row per currency')
+assertEq(s4.EXCH_RATE.text(), '94.1', 'import side by default')
+def m5 = new Message(body: cbic, props: [RateType: 'ZCIX', HomeCurrency: 'INR', TableRateType: 'export', SenderPort: 'P', SenderPartner: 'S', ReceiverPort: 'R', ReceiverPartner: 'T'])
+script.processData(m5)
+assertEq(new XmlSlurper().parseText(m5.getBody(String)).IDOC.E1EXCHANGE_RATE.E1BP1093_0.EXCH_RATE.text(), '92.4', 'export side on request')
+
 println 'ExchangeRateToIdoc: ok'

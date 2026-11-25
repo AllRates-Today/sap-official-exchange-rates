@@ -33,6 +33,7 @@ def Message processData(Message message) {
         home     : p('HomeCurrency').toUpperCase(),
         keep     : p('Currencies').toUpperCase().split(',').findAll { it } as Set,
         factors  : parseFactors(p('Factors')),
+        side     : p('TableRateType').toLowerCase(),
     ])
     if (!rows) throw new IllegalStateException("AllRatesToday: no rates to send for ${body.bank ?: '?'} ${body.rate_date ?: ''}")
     message.setBody(toIdocXml(rows, [
@@ -52,11 +53,23 @@ static Map<String, BigDecimal> parseFactors(String s) {
     }
 }
 
+// Two-sided tables carry several rows per currency (CBIC and Thai Customs: import and
+// export; URA: import, export, vat, income_tax). One TCURR rate type takes one of them:
+// TableRateType picks it; otherwise the API's own order applies (import before export).
+static int typeRank(t) {
+    int i = ['reference', 'mid', 'import', 'buy', 'sell', 'export'].indexOf(t as String)
+    i < 0 ? 99 : i
+}
+
 /** Table rows -> E1BP1093_0 field maps. Pure, so it can be tested outside CPI. */
 static List<Map> buildRows(body, Map opt) {
     String validFrom = (body.rate_date as String).replace('-', '')
     def out = []
-    for (r in (body.rates ?: [])) {
+    def seen = [] as Set
+    def rates = (body.rates ?: []).findAll { !opt.side || (it.type as String) == opt.side }
+    for (r in rates.sort { a, b -> typeRank(a.type) <=> typeRank(b.type) }) {
+        String pairKey = [r.base, r.quote].sort().join('/')
+        if (!seen.add(pairKey)) continue
         String from = r.base, to = r.quote
         BigDecimal v = new BigDecimal(r.value.toString())
         if (opt.home) {

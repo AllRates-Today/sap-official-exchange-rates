@@ -30,6 +30,7 @@ PARAMETERS:
   p_kurst TYPE kurst_curr OBLIGATORY DEFAULT 'ZCUS',
   p_curr  TYPE string LOWER CASE,             " optional list: USD,GBP,JPY
   p_fact  TYPE string LOWER CASE,             " optional ratios: JPY:100,KRW:1000
+  p_rtyp  TYPE char20 LOWER CASE,             " table side for two-sided tables: import / export
   p_key   TYPE string LOWER CASE,             " API key (see GET_API_KEY)
   p_upd   AS CHECKBOX DEFAULT 'X',            " UPD_ALLOW
   p_test  AS CHECKBOX DEFAULT 'X'.            " list only, do not post
@@ -129,7 +130,31 @@ CLASS lcl_loader IMPLEMENTATION.
     DATA(lv_home) = CONV string( p_home ).
     DATA(lv_keep) = to_upper( p_curr ).
 
-    LOOP AT ls_table-rates INTO DATA(ls_rate).
+    " Two-sided tables carry several rows per currency (CBIC, Thai Customs: import
+    " and export; URA: import, export, vat, income_tax). One rate type takes one
+    " side: P_RTYP picks it, otherwise the API's own order applies (import first).
+    IF p_rtyp IS NOT INITIAL.
+      DELETE ls_table-rates WHERE type <> p_rtyp.
+    ENDIF.
+    TYPES: BEGIN OF ty_ranked,
+             rank TYPE i,
+             rate TYPE ty_rate,
+           END OF ty_ranked.
+    DATA lt_ranked TYPE STANDARD TABLE OF ty_ranked WITH EMPTY KEY.
+    DATA lt_seen   TYPE SORTED TABLE OF string WITH UNIQUE KEY table_line.
+    DATA(lt_pref) = VALUE string_table( ( `reference` ) ( `mid` ) ( `import` ) ( `buy` ) ( `sell` ) ( `export` ) ).
+    LOOP AT ls_table-rates INTO DATA(ls_r).
+      DATA(lv_rank) = 99.
+      READ TABLE lt_pref WITH KEY table_line = ls_r-type TRANSPORTING NO FIELDS.
+      IF sy-subrc = 0.
+        lv_rank = sy-tabix.
+      ENDIF.
+      APPEND VALUE #( rank = lv_rank rate = ls_r ) TO lt_ranked.
+    ENDLOOP.
+    SORT lt_ranked BY rank STABLE.
+
+    LOOP AT lt_ranked INTO DATA(ls_ranked).
+      DATA(ls_rate) = ls_ranked-rate.
       DATA lv_foreign TYPE string.
       DATA lv_value   TYPE decfloat34.
       IF ls_rate-quote = lv_home.                       " already foreign -> home
@@ -140,6 +165,10 @@ CLASS lcl_loader IMPLEMENTATION.
         CONTINUE.
       ENDIF.
       IF lv_keep IS NOT INITIAL AND lv_keep NS lv_foreign.
+        CONTINUE.
+      ENDIF.
+      INSERT lv_foreign INTO TABLE lt_seen.             " first (best-ranked) row wins
+      IF sy-subrc <> 0.
         CONTINUE.
       ENDIF.
       DATA(lv_factor) = factor_for( lv_foreign ).
