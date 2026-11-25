@@ -71,7 +71,7 @@ Prerequisites: the SSL client PSE (STRUST) must trust allratestoday.com's certif
 
 ## SAP GTS (customs)
 
-GTS calculates duty from TCURR under the exchange rate type assigned to each legal regulation (customizing *Control Setting for "Customs Processing" Service*). Load the customs table into that rate type in the feeder system by either route above, and distribute it to GTS the standard way (report `RFALEX00`, message type `EXCHANGE_RATE` over ALE). Step by step: [Customs rates in SAP GTS](https://allratestoday.com/docs/integrations/sap/#gts).
+GTS calculates duty from TCURR under the exchange rate type assigned to each legal regulation (customizing *Control Setting for "Customs Processing" Service*). Load the customs table into that rate type in the feeder system by either route above, and distribute it to GTS the standard way (report `RFALEX00`, message type `EXCHANGE_RATE` over ALE). Step by step: [Customs rates in SAP GTS](https://allratestoday.com/docs/integrations/sap-gts/).
 
 ## S/4HANA Cloud Public Edition
 
