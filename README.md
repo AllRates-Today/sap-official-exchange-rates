@@ -2,14 +2,106 @@
 
 Load **official exchange rates** — customs valuation rates for 66 clearance countries, central bank reference rates from 124 central banks, and tax authority tables — from the [AllRatesToday API](https://allratestoday.com/customs-exchange-rate-api/) into SAP S/4HANA, SAP ECC and SAP Global Trade Services (GTS).
 
-Two routes, both writing to table **TCURR** under the exchange rate type you choose (for example `ZCUS` for customs, `M` for the standard rate):
+It covers every SAP edition:
 
-| Route | For | What is in this repo |
+| Your SAP | Route | In this repo |
 |---|---|---|
-| **SAP Integration Suite** (Cloud Integration) | S/4HANA and ECC, on-premise or private cloud, through Cloud Connector | [`integration-suite/ExchangeRateToIdoc.groovy`](integration-suite/ExchangeRateToIdoc.groovy): API response → `EXCHANGE_RATE01` IDoc |
-| **ABAP report** | On-premise systems that call the API directly | [`abap/zallrates_load_exchange_rates.prog.abap`](abap/zallrates_load_exchange_rates.prog.abap): API → `BAPI_EXCHRATE_CREATEMULTIPLE` |
+| **ECC, S/4HANA on-premise or private cloud** | SAP Integration Suite → `EXCHANGE_RATE01` IDoc → TCURR, through Cloud Connector | iFlow **AllRatesToday_Official_Rates_to_SAP_IDoc** |
+| **S/4HANA Cloud Public Edition** | SAP Integration Suite → Currency Exchange Rate API (OData V4, `SAP_COM_0B18`); needs no extra SAP subscription | iFlow **AllRatesToday_Official_Rates_to_S4HANA_Cloud** |
+| **S/4HANA Cloud with SAP Market Rates Management** | SAP Integration Suite → Bring Your Own Rates upload API, which S/4HANA pulls from | iFlow **AllRatesToday_Official_Rates_to_SAP_MRM_BYOR** |
+| **On-premise, without Integration Suite** | ABAP report → `BAPI_EXCHRATE_CREATEMULTIPLE` | [`abap/zallrates_load_exchange_rates.prog.abap`](abap/zallrates_load_exchange_rates.prog.abap) |
 
-Both are reference implementations: review them, run them in a test client, and adapt them to your standards. The Groovy mapping is unit-tested (see [Tests](#tests)); the ABAP report has not been run in an SAP system by us.
+Every route uses the authority's own table date (`rate_date`) as the valid-from date. Rates are stored under the exchange rate type you choose, for example `M`, or `ZCUS` for customs.
+
+**Status:**
+- **Groovy scripts:** unit-tested with Groovy 4 and stand-ins for the CPI APIs (see [Tests](#tests)).
+- **iFlow artifacts:** they follow the layout of SAP's own exchange-rate recipe. We checked that the XML is well-formed and every parameter is defined, but **we have not yet deployed them in an SAP tenant**.
+- **ABAP report:** not yet run in an SAP system.
+
+Import into a test tenant first, and [tell us](https://github.com/AllRates-Today/sap-official-exchange-rates/issues) what you find.
+
+## Ready-to-import package (Integration Suite)
+
+Download **AllRatesToday_SAP_Integration_Suite_v1.1.0.zip** from the [latest release](https://github.com/AllRates-Today/sap-official-exchange-rates/releases/latest). It contains one zip per iFlow. Nothing gets installed in the SAP system itself.
+
+1. Create a package under **Design → Integrations and APIs → Create**, for example *AllRatesToday Exchange Rates*. Then go to **Artifacts → Add → Integration Flow → Upload** and pick the iFlow zip for your landscape.
+2. Under **Monitor → Security Material → Create → Secure Parameter**, create `AllRatesToday_API_Key` holding your API key ([get one](https://allratestoday.com/register/)).
+3. **Configure** the iFlow. Every setting is externalized, so you don't edit the flow itself:
+
+| Parameter | Meaning | Default |
+|---|---|---|
+| `Schedule` | Timer. Set it to run after your source publishes (ECB about 16:00 CET; RBI 13:30 IST; monthly customs tables near month end) | daily 16:30 UTC |
+| `API_Key_Alias` | Secure Parameter that holds the key | `AllRatesToday_API_Key` |
+| `Source` | Central bank or tax authority code, such as `ecb`, `rbi`, `hmrc`, `bazg` or `boc` ([list](https://allratestoday.com/central-bank-rates-api/)) | `ecb` |
+| `Customs_Country` | ISO code for customs valuation rates (`NL`, `US`, `IN`, ...). Takes priority over `Source` | `-` |
+| `Rate_Type` | Exchange rate type (KURST) | `M` |
+| `Home_Currency` | Writes every rate as foreign → home (direct quotation) | `-` (the table's own direction) |
+| `Currencies` | Comma-separated list to load, e.g. `USD,GBP,JPY` | `-` (all) |
+| `Factors` | Ratios matching OBBS/TCURF, e.g. `JPY:100,KRW:1000` | `-` |
+| `Table_Rate_Type` | Two-sided tables (CBIC, Thai Customs, Korea Customs, URA, Iceland): `import` or `export` | `-` (import) |
+| `Lookback_Days` | `0` loads the latest table. `1`–`366` loads every table published in the last N days (backfill; paid plans; one API call per day). Set it back to `0` after the run | `0` |
+
+`-` means "not set", because a Content Modifier constant cannot be empty.
+
+4. Fill in the connection parameters for your flow (below) and **Deploy**. Watch the run under **Monitor → Message Processing**. A failed run carries the error text from the API or from SAP.
+
+Use one configured copy per source. For example, to load the ECB table into `M` and the Dutch customs table into `ZCUS`, upload the iFlow twice under different names.
+
+### ECC / S/4HANA on-premise (IDoc)
+
+| Parameter | Value |
+|---|---|
+| `IDoc_Address` | `http://<virtual host>:<port>/sap/bc/srt/idoc?sap-client=<client>` (the Cloud Connector virtual host) |
+| `IDoc_Location_ID` | Cloud Connector location ID, if any |
+| `IDoc_Credentials` | User Credentials artifact for the IDoc user |
+| `Sender_Port`, `Sender_Partner`, `Receiver_Port`, `Receiver_Partner` | EDI_DC40 partner data. These must match WE20 ([backend setup](#sap-backend)) |
+
+### S/4HANA Cloud Public Edition (Currency Exchange Rate API)
+
+In S/4HANA Cloud:
+1. Create a **Communication System** with an inbound user that uses the client certificate from your Cloud Integration keystore.
+2. Go to **Communication Arrangements → New** and choose **`SAP_COM_0B18`** (Finance - Currency Exchange Rates Integration).
+
+| Parameter | Value |
+|---|---|
+| `S4_Host` | API host of the tenant, e.g. `https://my000000-api.s4hana.cloud.sap` |
+| `S4_Authentication` | `Client Certificate` (X.509), or `Basic` if your arrangement allows a user and password |
+| `S4_Private_Key_Alias` | Keystore alias of the client certificate |
+| `S4_Credentials` | User Credentials artifact (Basic only) |
+
+**What the flow does:**
+1. Fetches a CSRF token.
+2. Posts one `$batch` to `/sap/opu/odata4/sap/api_currencyexchangerate/srvd_a2x/sap/currencyexchangerate/0001/`. It contains one `POST CurrencyExchangeRate` per rate, each in its own change set, with these fields: `ExchangeRateType`, `SourceCurrency`, `TargetCurrency`, `ExchangeRateEffectiveDate`, `AbsoluteExchangeRate`, `NumberOfSourceCurrencyUnits`, `NumberOfTargetCurrencyUnits`.
+3. Counts a rate that already exists for that date as skipped, so reruns are safe. If S/4HANA rejects a rate for any other reason, the run fails with S/4HANA's message.
+
+The rates then appear in the **Currency Exchange Rates** app.
+
+### S/4HANA Cloud with Market Rates Management (BYOR)
+
+This route needs an SAP Market Rates Management, Bring Your Own Rates subscription. That is a paid BTP service; its free plan allows 100 records per request.
+
+| Parameter | Value |
+|---|---|
+| `BYOR_Upload_URL` | `uploadUrl` from the service key |
+| `BYOR_OAuth_Credentials` | OAuth2 Client Credentials artifact holding the token URL, client ID and secret from the service key |
+| `BYOR_Provider` | `Y001` (customer-managed) or `Y002` (SAP-managed) |
+| `BYOR_Property` | Market data property, default `CMID` |
+| `BYOR_Max_Records` | `1500` on the default plan, `100` on the free plan |
+
+Each record is sent with `marketDataSource` `BYOR`, category `01`, `key1`/`key2` set to the from/to currency, and `effectiveTime` `00:00:00` GMT.
+
+In S/4HANA:
+1. Set up communication arrangements `SAP_COM_0203` and `SAP_COM_0841`.
+2. Map the notations in *Assign Currency Notations - Datafeed*.
+3. Schedule *Request Current Market Data*.
+
+Unless you already run Market Rates Management, use the direct API route above.
+
+### Rebuild the zips
+
+```bash
+python3 package/build.py   # dist/*.zip from integration-suite/*.groovy
+```
 
 ## Which endpoint
 
@@ -22,7 +114,7 @@ Both are reference implementations: review them, run them in a test client, and 
 
 Send the key as `Authorization: Bearer <key>`. Every response carries `rate_date`, the date of the authority's own table, which both routes use as `VALID_FROM`.
 
-## Route 1: SAP Integration Suite → IDoc
+## Building the IDoc iFlow yourself
 
 The iFlow has four steps:
 
@@ -73,19 +165,18 @@ Prerequisites: the SSL client PSE (STRUST) must trust allratestoday.com's certif
 
 GTS calculates duty from TCURR under the exchange rate type assigned to each legal regulation (customizing *Control Setting for "Customs Processing" Service*). Load the customs table into that rate type in the feeder system by either route above, and distribute it to GTS the standard way (report `RFALEX00`, message type `EXCHANGE_RATE` over ALE). Step by step: [Customs rates in SAP GTS](https://allratestoday.com/docs/integrations/sap-gts/).
 
-## S/4HANA Cloud Public Edition
-
-Not covered by this repo. Public Edition takes exchange rates through SAP Market Rates Management (Bring Your Own Rates) or the Currency Exchange Rate API (`API_CURRENCYEXCHANGERATE`, communication scenario `SAP_COM_0B18`). Check the field names on the SAP Business Accelerator Hub for your release; send direct quotations only. [Contact us](https://allratestoday.com/contact?tab=business&topic=tax_authority_data) if you need this route.
-
 ## Tests
 
-The Groovy mapping is tested with plain Groovy 4 and a stand-in for the CPI `Message` class:
+The Groovy scripts are tested with plain Groovy 4 and stand-ins for the CPI `Message` API:
 
 ```bash
 CP="groovy-4.0.24.jar:groovy-json-4.0.24.jar:groovy-xml-4.0.24.jar"
-java -cp "$CP" org.codehaus.groovy.tools.FileSystemCompiler -d build test/com/sap/gateway/ip/core/customdev/util/Message.groovy
-java -cp "$CP:build" groovy.ui.GroovyMain test/run.groovy   # ExchangeRateToIdoc: ok
+java -cp "$CP:test" groovy.ui.GroovyMain test/run.groovy     # ExchangeRateToIdoc: ok
+java -cp "$CP:test" groovy.ui.GroovyMain test/fetch.groovy   # FetchRates: ok
+java -cp "$CP:test" groovy.ui.GroovyMain test/cloud.groovy   # ExchangeRateToS4Cloud: ok
 ```
+
+The tests cover direction and inversion, ratios, the currency filter, rates too large for DEC 9,5, IDoc control data, two-sided tables, the backfill window (one call per day, duplicate tables dropped by `rate_date`, 404 days skipped, API errors surfaced), the `$batch` body and response handling, and the BYOR payload and record limit.
 
 ## 🔗 Links
 

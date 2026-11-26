@@ -7,6 +7,9 @@
  *
  * Input body: GET https://allratestoday.com/api/v1/customs/{country}/latest
  *         or  GET https://allratestoday.com/api/v1/central-bank/{source}/latest
+ *         or  the output of FetchRates.groovy: {"tables":[table, table, ...]}, one
+ *             table per published date (a backfill). All rows go into one IDoc,
+ *             each with its own VALID_FROM.
  *
  * Exchange properties (set them in a Content Modifier, all optional except partners):
  *   RateType           TCURR rate type, e.g. ZCUS (default M)
@@ -19,30 +22,34 @@
  *   ChangeFixed        X / blank (default blank) -> CHG_FIXED
  *   AllowedDeviation   000-999 percent (default 000) -> DEV_ALLOW
  *
- * Output headers: AllRatesRateDate (the table's own date), AllRatesSource, AllRatesRows.
+ * Output headers: AllRatesRateDate (the latest table date), AllRatesSource, AllRatesRows.
  */
 import com.sap.gateway.ip.core.customdev.util.Message
 import groovy.json.JsonSlurper
 import groovy.xml.MarkupBuilder
 
 def Message processData(Message message) {
-    def p = { String k, String d = '' -> (message.getProperty(k) ?: d).toString().trim() }
+    // '-' means "not set": the package's Content Modifier cannot hold an empty constant.
+    def p = { String k, String d = '' -> def v = (message.getProperty(k) ?: '').toString().trim(); v && v != '-' ? v : d }
     def body = new JsonSlurper().parseText(message.getBody(String) as String)
-    def rows = buildRows(body, [
+    def tables = body.tables != null ? body.tables : [body]
+    def opt = [
         rateType : p('RateType', 'M'),
         home     : p('HomeCurrency').toUpperCase(),
         keep     : p('Currencies').toUpperCase().split(',').findAll { it } as Set,
         factors  : parseFactors(p('Factors')),
         side     : p('TableRateType').toLowerCase(),
-    ])
-    if (!rows) throw new IllegalStateException("AllRatesToday: no rates to send for ${body.bank ?: '?'} ${body.rate_date ?: ''}")
+    ]
+    def rows = tables.collectMany { buildRows(it, opt) }
+    def last = tables ? tables.max { it.rate_date } : [:]
+    if (!rows) throw new IllegalStateException("AllRatesToday: no rates to send for ${last?.bank ?: '?'} ${last?.rate_date ?: ''}")
     message.setBody(toIdocXml(rows, [
         sndpor: p('SenderPort'), sndprn: p('SenderPartner'),
         rcvpor: p('ReceiverPort'), rcvprn: p('ReceiverPartner'),
         upd: p('UpdateAllowed', 'X'), chg: p('ChangeFixed'), dev: p('AllowedDeviation', '000'),
     ]))
-    message.setHeader('AllRatesRateDate', body.rate_date)
-    message.setHeader('AllRatesSource', body.bank)
+    message.setHeader('AllRatesRateDate', last.rate_date)
+    message.setHeader('AllRatesSource', last.bank)
     message.setHeader('AllRatesRows', rows.size())
     return message
 }

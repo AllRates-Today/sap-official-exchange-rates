@@ -51,4 +51,9 @@ def m5 = new Message(body: cbic, props: [RateType: 'ZCIX', HomeCurrency: 'INR', 
 script.processData(m5)
 assertEq(new XmlSlurper().parseText(m5.getBody(String)).IDOC.E1EXCHANGE_RATE.E1BP1093_0.EXCH_RATE.text(), '92.4', 'export side on request')
 
+// '-' from the package's Content Modifier means "not set"
+def m6 = new Message(body: jp, props: [HomeCurrency: '-', Currencies: '-', Factors: '-', TableRateType: '-', RateType: 'M', SenderPort: 'P', SenderPartner: 'S', ReceiverPort: 'R', ReceiverPartner: 'T'])
+script.processData(m6)
+assertEq(new XmlSlurper().parseText(m6.getBody(String)).IDOC.E1EXCHANGE_RATE.E1BP1093_0.EXCH_RATE.text(), '154.32', "'-' treated as empty")
+
 println 'ExchangeRateToIdoc: ok'
